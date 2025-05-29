@@ -54,7 +54,7 @@ The exported JSON includes:
 {
   "export_info": {
     "timestamp": "2024-01-20T10:30:00.000Z",
-    "source": "Gemini Chat Exporter v1.0.1",
+    "source": "Gemini Chat Exporter v1.0.2",
     "total_chats": 1,
     "total_messages": 10
   },  "chats": [
@@ -154,6 +154,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 This extension is not affiliated with Google or the Gemini AI service. It's an independent tool created to help users export their own chat data.
 
 ## Changelog
+
+### v1.0.2
+- **Major improvements to chat extraction**
+- Enhanced DOM selectors for current Gemini interface
+- Better message detection with fallback patterns
+- Improved content extraction and role detection
+- Added text pattern recognition for user/assistant messages
+- Fixed extraction of full conversations including longer responses
+- Better handling of dynamic content and loading delays
 
 ### v1.0.1
 - Initial release
