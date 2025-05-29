@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gemini Chat Exporter",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Export all your Gemini chats",
   "permissions": [
     "activeTab",
