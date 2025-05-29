@@ -112,10 +112,12 @@ async function extractCurrentChatData() {
     // Look for the actual text content within the user query
     const queryTextElements = userQuery.querySelectorAll('.query-text-line, .query-text, p');
     let userText = '';
+    const seenTexts = new Set(); // Prevent duplicates
     
     queryTextElements.forEach(element => {
       const text = element.textContent?.trim();
-      if (text && !text.includes('Opens in a new window')) {
+      if (text && !text.includes('Opens in a new window') && !seenTexts.has(text)) {
+        seenTexts.add(text);
         userText += text + ' ';
       }
     });
@@ -143,30 +145,41 @@ async function extractCurrentChatData() {
     
     if (markdownDiv) {
       let assistantText = '';
+      const processedElements = new Set(); // Prevent duplicates
       
-      // Extract all paragraphs, lists, and other content
-      const contentElements = markdownDiv.querySelectorAll('p, li, strong, ul, ol');
-      contentElements.forEach(element => {
-        let text = element.textContent?.trim();
-        if (text && !text.includes('Analysis') && text.length > 5) {
-          // Format list items properly
-          if (element.tagName === 'LI') {
-            assistantText += '• ' + text + '\n';
-          } else if (element.tagName === 'STRONG') {
-            assistantText += '**' + text + '** ';
-          } else {
-            assistantText += text + '\n\n';
-          }
+      // Extract paragraphs first (main content)
+      const paragraphs = markdownDiv.querySelectorAll('p');
+      paragraphs.forEach(p => {
+        const text = p.textContent?.trim();
+        if (text && text.length > 5 && !processedElements.has(text)) {
+          processedElements.add(text);
+          assistantText += text + '\n\n';
         }
       });
       
+      // Extract list items
+      const listItems = markdownDiv.querySelectorAll('li');
+      if (listItems.length > 0) {
+        assistantText += '\n';
+        listItems.forEach(li => {
+          const text = li.textContent?.trim();
+          if (text && text.length > 5 && !processedElements.has(text)) {
+            processedElements.add(text);
+            assistantText += '• ' + text + '\n';
+          }
+        });
+      }
+      
       // Clean up the text
       assistantText = assistantText
+        .replace(/\*\*(.*?)\*\*/g, '$1') // Remove markdown bold markers
         .replace(/\n\n+/g, '\n\n') // Remove excessive newlines
         .replace(/Analysis\s*Analysis/gi, 'Analysis') // Remove duplicate Analysis
+        .replace(/Read documents\s*/gi, '') // Remove "Read documents"
+        .replace(/Response finalized\s*/gi, '') // Remove "Response finalized"
         .trim();
       
-      if (assistantText) {
+      if (assistantText && assistantText.length > 20) {
         messages.push({
           role: 'assistant',
           content: assistantText,
@@ -305,7 +318,7 @@ async function downloadAsJSON(data, filename) {
       const exportData = {
         export_info: {
           timestamp: new Date().toISOString(),
-          source: 'Gemini Chat Exporter v1.0.3',
+          source: 'Gemini Chat Exporter v1.0.4',
           total_chats: data.length,
           total_messages: data.reduce((sum, chat) => sum + (chat.messages?.length || 0), 0)
         },
@@ -336,4 +349,4 @@ async function downloadAsJSON(data, filename) {
   });
 }
 
-console.log('Gemini Chat Exporter v1.0.3 loaded - Fixed based on debug analysis');
+console.log('Gemini Chat Exporter v1.0.4 loaded - Clean formatting and duplicate removal');
