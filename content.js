@@ -1,4 +1,5 @@
 // Wait for page to load before setting up listeners
+const manifest = chrome.runtime.getManifest();
 let isReady = false;
 
 function initialize() {
@@ -633,7 +634,7 @@ async function downloadAsJSON(data, baseFilenamePrefix) {
   return new Promise((resolve, reject) => {
     try {
       // Get manifest data
-      const manifest = chrome.runtime.getManifest();
+
 
       const exportData = {
         export_info: {
@@ -717,4 +718,5 @@ function downloadAsText(data, filename) {
 }
 
 // Log that content script is loaded
-console.log('Gemini Chat Exporter content script v1.0.2 loaded');
+console.log(`${manifest.name} content script v${manifest.version} per manifest`);
+
