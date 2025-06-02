@@ -591,13 +591,55 @@ async function extractAllChatsData() {
 //     word_count: content.split(/\s+/).filter(word => word.length > 0).length
 //   };
 // }
-async function downloadAsJSON(data, filename) {
+
+/**
+ * Sanitizes a string to be safe for use as a filename.
+ * Removes/replaces characters forbidden on major OSes and cleans up the result.
+ * @param {string} name The original string to sanitize.
+ * @param {string} defaultName A name to use if sanitization results in an empty string.
+ * @param {number} maxLength Max length for the sanitized name (excluding suffix).
+ * @returns {string} A sanitized string suitable for use in a filename.
+ */
+function sanitizeFilename(name, defaultName = 'Untitled_Chat', maxLength = 100) {
+  if (typeof name !== 'string' || !name.trim()) {
+    return defaultName;
+  }
+
+  // Remove or replace characters forbidden in Windows, macOS, and Linux filenames.
+  // Common forbidden characters: / \ ? % * : | " < > and null/control characters.
+  let sanitized = name.replace(/[<>:"\/\\|?*\x00-\x1F]/g, '_');
+
+  // Replace multiple consecutive underscores (or other replacements) with a single one
+  sanitized = sanitized.replace(/_+/g, '_');
+
+  // Remove leading/trailing underscores, periods, or spaces that might have been created
+  sanitized = sanitized.replace(/^[_.\s]+|[_.\s]+$/g, '').trim();
+
+  // Truncate to a reasonable length to avoid overly long filenames
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength).trim();
+    // Ensure it doesn't end with an underscore after truncation
+    sanitized = sanitized.replace(/_+$/, '');
+  }
+
+  // If, after all that, the string is empty (e.g., consisted only of forbidden chars), use default
+  if (!sanitized) {
+    return defaultName;
+  }
+
+  return sanitized;
+}
+async function downloadAsJSON(data, baseFilenamePrefix) {
   return new Promise((resolve, reject) => {
     try {
+      // Get manifest data
+      const manifest = chrome.runtime.getManifest();
+
       const exportData = {
         export_info: {
           timestamp: new Date().toISOString(),
-          source: 'Gemini Chat Exporter v1.0.2',
+          // Dynamically use the name and version from manifest.json
+          source: `${manifest.name} v${manifest.version}`,
           total_chats: data.length,
           total_messages: data.reduce((sum, chat) => sum + (chat.messages?.length || 0), 0)
         },
@@ -610,13 +652,29 @@ async function downloadAsJSON(data, filename) {
 
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${filename}-${new Date().toISOString().split('T')[0]}.json`;
-      a.style.display = 'none';
 
+      const now = new Date();
+      const datePart = now.getFullYear() +
+        '-' + String(now.getMonth() + 1).padStart(2, '0') +
+        '-' + String(now.getDate()).padStart(2, '0');
+      const timePart = String(now.getHours()).padStart(2, '0') +
+        '-' + String(now.getMinutes()).padStart(2, '0');
+
+      const dateTimeSuffix = `${datePart}_${timePart}`;
+
+      let chatTitleForFilename;
+      if (baseFilenamePrefix === 'gemini-current-chat' && data && data.length === 1 && data[0] && data[0].title) {
+        chatTitleForFilename = sanitizeFilename(data[0].title, 'Current_Chat');
+      } else {
+        chatTitleForFilename = sanitizeFilename(baseFilenamePrefix, 'Exported_Chats');
+      }
+
+      a.download = `${chatTitleForFilename}-${dateTimeSuffix}.json`;
+
+      a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
 
-      // Cleanup
       setTimeout(() => {
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
@@ -624,11 +682,11 @@ async function downloadAsJSON(data, filename) {
       }, 100);
 
     } catch (error) {
+      console.error('DownloadAsJSON error:', error);
       reject(error);
     }
   });
 }
-
 // Alternative export formats
 function downloadAsText(data, filename) {
   let textContent = '';
