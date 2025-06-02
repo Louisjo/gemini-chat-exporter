@@ -90,27 +90,133 @@ async function exportAllChats() {
   }
 }
 
+/**
+ * Attempts to scroll a given element to its top to load all dynamically-loaded content.
+ * It waits after each scroll and checks if new content has loaded (by observing scrollHeight).
+ * @param {Element} scrollableElement The HTML element to scroll.
+ * @param {number} scrollDelayMs Delay in milliseconds to wait after each scroll attempt.
+ * @param {number} maxAttempts Maximum number of scroll attempts.
+ * @param {number} stabilityChecksRequired How many consecutive times scrollHeight must be stable.
+ */
+async function scrollToTopToLoadAll(scrollableElement, scrollDelayMs = 1000, maxAttempts = 30, stabilityChecksRequired = 3) {
+  if (!scrollableElement) {
+    console.warn('Scrollable element not provided for scrollToTopToLoadAll. Auto-scrolling aborted.');
+    return;
+  }
+
+  console.log(`Starting auto-scroll for element:`, scrollableElement);
+  let attempts = 0;
+  let previousScrollHeight = -1;
+  let stableCycles = 0;
+
+  // Initial small pause for any pending UI updates before starting
+  await new Promise(resolve => setTimeout(resolve, 200));
+
+  while (attempts < maxAttempts) {
+    previousScrollHeight = scrollableElement.scrollHeight;
+    scrollableElement.scrollTop = 0; // Scroll to the very top
+
+    console.log(`Scroll attempt #${attempts + 1}/${maxAttempts}: scrollTop set to 0. Current scrollHeight: ${scrollableElement.scrollHeight}, Previous: ${previousScrollHeight}`);
+
+    // Wait for new content to potentially load.
+    // Increasing delay slightly for later attempts can sometimes help.
+    await new Promise(resolve => setTimeout(resolve, scrollDelayMs + (attempts * 50)));
+
+    if (scrollableElement.scrollHeight === previousScrollHeight) {
+      stableCycles++;
+      console.log(`Scroll height stable for ${stableCycles} cycle(s) at ${scrollableElement.scrollHeight}. Required: ${stabilityChecksRequired}`);
+      if (stableCycles >= stabilityChecksRequired) {
+        // If scrollTop is still significantly > 0, it might indicate the page auto-adjusted
+        // or there's more content still being loaded. One last forceful scroll.
+        if (scrollableElement.scrollTop > 10) { // Using 10px as a small tolerance
+          console.log(`Scroll height stable, but scrollTop is ${scrollableElement.scrollTop}. Performing one final scroll and wait.`);
+          scrollableElement.scrollTop = 0;
+          await new Promise(resolve => setTimeout(resolve, scrollDelayMs)); // Wait again after the final scroll
+          console.log(`After final scroll, scrollTop is ${scrollableElement.scrollTop}, scrollHeight is ${scrollableElement.scrollHeight}`);
+        }
+        console.log('Scroll height stable and/or top reached. Assuming all content loaded.');
+        break;
+      }
+    } else {
+      stableCycles = 0; // Reset counter if scroll height changed
+      console.log(`Scroll height changed from ${previousScrollHeight} to ${scrollableElement.scrollHeight}. More content likely loaded.`);
+    }
+    attempts++;
+  }
+
+  if (attempts >= maxAttempts) {
+    console.warn('Max scroll attempts reached. Not all content may be loaded.');
+  }
+  console.log('Finished scrolling attempts.');
+  // Final small pause to ensure rendering completes after the last scroll/load
+  await new Promise(resolve => setTimeout(resolve, 500));
+}
+
 async function extractCurrentChatData() {
-  console.log('Extracting current chat data (new logic)...');
+  console.log('Extracting current chat data (new logic with targeted auto-scroll)...');
 
-  // Wait a bit for dynamic content to load, if necessary
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  // --- START: AUTO-SCROLLING INTEGRATION (REVISED SCROLL TARGET) ---
+  let scrollableChatArea = null;
 
+  // Attempt 1: Target the 'infinite-scroller' within '#chat-history'
+  const chatHistoryContainer = document.getElementById('chat-history');
+  if (chatHistoryContainer) {
+    scrollableChatArea = chatHistoryContainer.querySelector('infinite-scroller');
+    if (scrollableChatArea) {
+      console.log("Successfully identified scrollable area: #chat-history > infinite-scroller", scrollableChatArea);
+    } else {
+      // Fallback: If 'infinite-scroller' is not found within '#chat-history',
+      // try '#chat-history' itself. (You found this wasn't scrollable in your test,
+      // but it's a structural fallback).
+      console.warn("Could not find 'infinite-scroller' inside #chat-history. Attempting to use #chat-history itself.");
+      scrollableChatArea = chatHistoryContainer;
+    }
+  }
+
+  // Attempt 2: If no scrollableChatArea found yet (e.g., #chat-history or its child was not found/suitable)
+  // fall back to 'main[role="main"]'.
+  if (!scrollableChatArea || scrollableChatArea.scrollHeight <= scrollableChatArea.clientHeight) {
+    // This check (scrollHeight <= clientHeight) ensures we only fall back if the currently selected
+    // scrollableChatArea isn't actually scrollable.
+    if (scrollableChatArea) { // Log if the previous candidate was found but not scrollable
+      console.log(`Selected element (${scrollableChatArea.tagName}, ID: ${scrollableChatArea.id}, Class: ${scrollableChatArea.className}) is not currently scrollable (scrollHeight: ${scrollableChatArea.scrollHeight}, clientHeight: ${scrollableChatArea.clientHeight}).`);
+    }
+    console.warn("Primary scroll target not found or not scrollable. Attempting fallback: 'main[role=\"main\"]'.");
+    scrollableChatArea = document.querySelector('main[role="main"]');
+    if (scrollableChatArea) {
+      console.log("Identified scrollable area with fallback: main[role=\"main\"]", scrollableChatArea);
+    }
+  }
+
+  // If a scrollable area is found, attempt to scroll it.
+  if (scrollableChatArea && scrollableChatArea.scrollHeight > scrollableChatArea.clientHeight) {
+    // Only scroll if the element is actually scrollable
+    await scrollToTopToLoadAll(scrollableChatArea, 1000, 30, 3); // Parameters: element, delay, maxAttempts, stabilityChecks
+  } else if (scrollableChatArea) {
+    console.log("Identified scrollable area is not currently scrollable (content fits within viewport or it's not the correct element). Skipping auto-scroll.", scrollableChatArea);
+  }
+  else {
+    console.warn('Could not identify a suitable scrollable chat area. Auto-scrolling skipped. Export may be incomplete for long chats.');
+  }
+
+  // Brief pause after scrolling (or attempting to) to allow the DOM to settle.
+  await new Promise(resolve => setTimeout(resolve, 750));
+  // --- END: AUTO-SCROLLING INTEGRATION ---
+
+  // The rest of your message extraction logic starts here:
   const messages = [];
-  // Using 'div.conversation-container' as the primary selector for each "turn"
   const turnContainers = document.querySelectorAll('div.conversation-container');
 
-  console.log(`Found ${turnContainers.length} potential turn containers.`);
+  console.log(`Found ${turnContainers.length} turn containers after scrolling attempts.`);
 
   turnContainers.forEach((turnElement, turnIndex) => {
-    // Attempt to extract user message from this turn container
+    // Attempt to extract user message
     const userQueryElement = turnElement.querySelector('user-query');
     if (userQueryElement) {
-      const userTextElement = userQueryElement.querySelector('div.query-text > p.query-text-line'); // Path for user text
+      const userTextElement = userQueryElement.querySelector('div.query-text > p.query-text-line');
       if (userTextElement) {
         const content = userTextElement.innerText.trim();
-        if (content) { // Keep even short messages if they exist and are trimmed
-          console.log(`User message found in turn ${turnIndex + 1}: "${content.substring(0, 50)}..."`);
+        if (content) {
           messages.push({
             role: 'user',
             content: content,
@@ -123,37 +229,29 @@ async function extractCurrentChatData() {
       }
     }
 
-    // Attempt to extract model response from this turn container
+    // Attempt to extract model response
     const modelResponseEntity = turnElement.querySelector('model-response');
     if (modelResponseEntity) {
-      const contentWrapper = modelResponseEntity.querySelector('message-content div.markdown'); // Path for model text container
+      const contentWrapper = modelResponseEntity.querySelector('message-content div.markdown');
       if (contentWrapper) {
-        // --- Logic to preserve code blocks and formatting (adapted from original extractMessageData) ---
-        // Create a temporary clone of the contentWrapper to manipulate for text extraction
-        // This avoids altering the live page an_d preserves original HTML for any other processing.
         const tempContentDiv = document.createElement('div');
         tempContentDiv.innerHTML = contentWrapper.innerHTML;
 
-        // Handle code blocks: replace them with markdown-style backticks
-        const codeBlocks = tempContentDiv.querySelectorAll('pre, code, .code-block'); // Use original selectors for code blocks
+        const codeBlocks = tempContentDiv.querySelectorAll('pre, code, .code-block');
         codeBlocks.forEach((block) => {
           const codeContent = block.innerText || block.textContent || '';
-          // Replace the block element with a text node representing the code in markdown
-          // This is a common way to get a clean text representation while marking code.
-          // The parent of 'block' will have its innerText reflect this change.
-          block.parentNode.replaceChild(document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`), block);
+          // Using a text node replacement strategy for code blocks
+          const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
+          block.parentNode.replaceChild(preformattedText, block);
         });
 
         let content = tempContentDiv.innerText.trim();
-
-        // Original cleanup rules
         content = content
-          .replace(/\n\s*\n\s*\n/g, '\n\n') // Remove excessive newlines
-          .replace(/Analysis\s*Analysis/g, 'Analysis') // Remove duplicate "Analysis" (if it appears)
+          .replace(/\n\s*\n\s*\n/g, '\n\n')
+          .replace(/Analysis\s*Analysis/g, 'Analysis')
           .trim();
 
-        if (content) { // Keep even short messages if they exist and are trimmed
-          console.log(`Model response found in turn ${turnIndex + 1}: "${content.substring(0, 50)}..."`);
+        if (content) {
           messages.push({
             role: 'assistant',
             content: content,
@@ -167,7 +265,6 @@ async function extractCurrentChatData() {
     }
   });
 
-  // Get page title (remains the same as original)
   let title = document.title || 'Gemini Chat';
   if (title.includes('Gemini')) {
     title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
@@ -182,7 +279,7 @@ async function extractCurrentChatData() {
     messages: messages
   };
 
-  console.log('Final extracted chat data (new logic):', chatData);
+  console.log('Final extracted chat data (with targeted auto-scroll logic):', chatData);
   return chatData;
 }
 
