@@ -1,6 +1,53 @@
 // Wait for page to load before setting up listeners
-const manifest = chrome.runtime.getManifest();
+let manifest = chrome.runtime.getManifest();
 let isReady = false;
+
+function debugDOMStructure() {
+  console.log('=== DOM DEBUG INFO ===');
+  console.log('Current URL:', window.location.href);
+  console.log('Page title:', document.title);
+  console.log('Document ready state:', document.readyState);
+
+  // Check for common Gemini containers
+  const containers = [
+    '#chat-history',
+    'infinite-scroller',
+    'div.conversation-container',
+    'user-query',
+    'model-response',
+    'main[role="main"]',
+    '[data-testid]'
+  ];
+
+  containers.forEach(selector => {
+    const elements = document.querySelectorAll(selector);
+    console.log(`${selector}: ${elements.length} elements found`);
+    if (elements.length > 0) {
+      console.log('First element:', elements[0]);
+    }
+  });
+
+  // Check for any elements with data attributes that might be messages
+  const allDivs = document.querySelectorAll('div');
+  console.log(`Total divs found: ${allDivs.length}`);
+
+  // Look for elements that might contain conversation data
+  const potentialMessages = Array.from(allDivs).filter(div => {
+    const text = div.innerText?.trim();
+    return text && text.length > 20 && text.length < 2000;
+  });
+  console.log(`Potential message elements: ${potentialMessages.length}`);
+
+  // Log the first few for inspection
+  potentialMessages.slice(0, 3).forEach((el, i) => {
+    console.log(`Potential message ${i}:`, {
+      tagName: el.tagName,
+      classes: el.className,
+      id: el.id,
+      textPreview: el.innerText?.slice(0, 100)
+    });
+  });
+}
 
 function initialize() {
   if (document.readyState === 'loading') {
@@ -39,6 +86,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
       return true; // Will respond asynchronously
+    } else if (message.action === 'debug') {
+      debugDOMStructure();
+      sendResponse({ success: true });
+      return false; // Synchronous response
     }
   } catch (error) {
     console.error('Content script error:', error);
@@ -99,191 +150,204 @@ async function exportAllChats() {
  * @param {number} maxAttempts Maximum number of scroll attempts.
  * @param {number} stabilityChecksRequired How many consecutive times scrollHeight must be stable.
  */
-async function scrollToTopToLoadAll(scrollableElement, scrollDelayMs = 1000, maxAttempts = 30, stabilityChecksRequired = 3) {
+/**
+ * Attempts to scroll a given element to its top to load all dynamically-loaded content.
+ * OPTIMIZED VERSION with much shorter timeouts and better logging
+ */
+async function scrollToTopToLoadAll(scrollableElement, scrollDelayMs = 300, maxAttempts = 8, stabilityChecksRequired = 2) {
   if (!scrollableElement) {
     console.warn('Scrollable element not provided for scrollToTopToLoadAll. Auto-scrolling aborted.');
     return;
   }
 
-  console.log(`Starting auto-scroll for element:`, scrollableElement);
+  console.log(`Starting OPTIMIZED auto-scroll for element:`, scrollableElement);
+  console.log(`Config: delay=${scrollDelayMs}ms, maxAttempts=${maxAttempts}, stability=${stabilityChecksRequired}`);
+
+  const startTime = Date.now();
   let attempts = 0;
   let previousScrollHeight = -1;
   let stableCycles = 0;
 
   // Initial small pause for any pending UI updates before starting
-  await new Promise(resolve => setTimeout(resolve, 200));
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   while (attempts < maxAttempts) {
+    const attemptStart = Date.now();
     previousScrollHeight = scrollableElement.scrollHeight;
     scrollableElement.scrollTop = 0; // Scroll to the very top
 
     console.log(`Scroll attempt #${attempts + 1}/${maxAttempts}: scrollTop set to 0. Current scrollHeight: ${scrollableElement.scrollHeight}, Previous: ${previousScrollHeight}`);
 
-    // Wait for new content to potentially load.
-    // Increasing delay slightly for later attempts can sometimes help.
-    await new Promise(resolve => setTimeout(resolve, scrollDelayMs + (attempts * 50)));
+    // Much shorter wait time
+    await new Promise(resolve => setTimeout(resolve, scrollDelayMs));
 
     if (scrollableElement.scrollHeight === previousScrollHeight) {
       stableCycles++;
       console.log(`Scroll height stable for ${stableCycles} cycle(s) at ${scrollableElement.scrollHeight}. Required: ${stabilityChecksRequired}`);
       if (stableCycles >= stabilityChecksRequired) {
-        // If scrollTop is still significantly > 0, it might indicate the page auto-adjusted
-        // or there's more content still being loaded. One last forceful scroll.
-        if (scrollableElement.scrollTop > 10) { // Using 10px as a small tolerance
-          console.log(`Scroll height stable, but scrollTop is ${scrollableElement.scrollTop}. Performing one final scroll and wait.`);
-          scrollableElement.scrollTop = 0;
-          await new Promise(resolve => setTimeout(resolve, scrollDelayMs)); // Wait again after the final scroll
-          console.log(`After final scroll, scrollTop is ${scrollableElement.scrollTop}, scrollHeight is ${scrollableElement.scrollHeight}`);
-        }
-        console.log('Scroll height stable and/or top reached. Assuming all content loaded.');
+        console.log('Scroll height stable. Assuming all content loaded.');
         break;
       }
     } else {
       stableCycles = 0; // Reset counter if scroll height changed
       console.log(`Scroll height changed from ${previousScrollHeight} to ${scrollableElement.scrollHeight}. More content likely loaded.`);
     }
+
     attempts++;
+    const attemptDuration = Date.now() - attemptStart;
+    console.log(`Attempt ${attempts} completed in ${attemptDuration}ms`);
   }
+
+  const totalDuration = Date.now() - startTime;
+  console.log(`Scrolling completed in ${totalDuration}ms after ${attempts} attempts`);
 
   if (attempts >= maxAttempts) {
     console.warn('Max scroll attempts reached. Not all content may be loaded.');
   }
-  console.log('Finished scrolling attempts.');
-  // Final small pause to ensure rendering completes after the last scroll/load
-  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // Final small pause to ensure rendering completes
+  await new Promise(resolve => setTimeout(resolve, 200));
 }
 
+// UPDATED: Modified extractCurrentChatData with timeout protection
 async function extractCurrentChatData() {
-  console.log('Extracting current chat data (new logic with targeted auto-scroll)...');
+  console.log('Extracting current chat data (OPTIMIZED with timeout protection)...');
 
-  // --- START: AUTO-SCROLLING INTEGRATION (REVISED SCROLL TARGET) ---
-  let scrollableChatArea = null;
-
-  // Attempt 1: Target the 'infinite-scroller' within '#chat-history'
-  const chatHistoryContainer = document.getElementById('chat-history');
-  if (chatHistoryContainer) {
-    scrollableChatArea = chatHistoryContainer.querySelector('infinite-scroller');
-    if (scrollableChatArea) {
-      console.log("Successfully identified scrollable area: #chat-history > infinite-scroller", scrollableChatArea);
-    } else {
-      // Fallback: If 'infinite-scroller' is not found within '#chat-history',
-      // try '#chat-history' itself. (You found this wasn't scrollable in your test,
-      // but it's a structural fallback).
-      console.warn("Could not find 'infinite-scroller' inside #chat-history. Attempting to use #chat-history itself.");
-      scrollableChatArea = chatHistoryContainer;
-    }
-  }
-
-  // Attempt 2: If no scrollableChatArea found yet (e.g., #chat-history or its child was not found/suitable)
-  // fall back to 'main[role="main"]'.
-  if (!scrollableChatArea || scrollableChatArea.scrollHeight <= scrollableChatArea.clientHeight) {
-    // This check (scrollHeight <= clientHeight) ensures we only fall back if the currently selected
-    // scrollableChatArea isn't actually scrollable.
-    if (scrollableChatArea) { // Log if the previous candidate was found but not scrollable
-      console.log(`Selected element (${scrollableChatArea.tagName}, ID: ${scrollableChatArea.id}, Class: ${scrollableChatArea.className}) is not currently scrollable (scrollHeight: ${scrollableChatArea.scrollHeight}, clientHeight: ${scrollableChatArea.clientHeight}).`);
-    }
-    console.warn("Primary scroll target not found or not scrollable. Attempting fallback: 'main[role=\"main\"]'.");
-    scrollableChatArea = document.querySelector('main[role="main"]');
-    if (scrollableChatArea) {
-      console.log("Identified scrollable area with fallback: main[role=\"main\"]", scrollableChatArea);
-    }
-  }
-
-  // If a scrollable area is found, attempt to scroll it.
-  if (scrollableChatArea && scrollableChatArea.scrollHeight > scrollableChatArea.clientHeight) {
-    // Only scroll if the element is actually scrollable
-    await scrollToTopToLoadAll(scrollableChatArea, 1000, 30, 3); // Parameters: element, delay, maxAttempts, stabilityChecks
-  } else if (scrollableChatArea) {
-    console.log("Identified scrollable area is not currently scrollable (content fits within viewport or it's not the correct element). Skipping auto-scroll.", scrollableChatArea);
-  }
-  else {
-    console.warn('Could not identify a suitable scrollable chat area. Auto-scrolling skipped. Export may be incomplete for long chats.');
-  }
-
-  // Brief pause after scrolling (or attempting to) to allow the DOM to settle.
-  await new Promise(resolve => setTimeout(resolve, 750));
-  // --- END: AUTO-SCROLLING INTEGRATION ---
-
-  // The rest of your message extraction logic starts here:
-  const messages = [];
-  const turnContainers = document.querySelectorAll('div.conversation-container');
-
-  console.log(`Found ${turnContainers.length} turn containers after scrolling attempts.`);
-
-  turnContainers.forEach((turnElement, turnIndex) => {
-    // Attempt to extract user message
-    const userQueryElement = turnElement.querySelector('user-query');
-    if (userQueryElement) {
-      const userTextElement = userQueryElement.querySelector('div.query-text > p.query-text-line');
-      if (userTextElement) {
-        const content = userTextElement.innerText.trim();
-        if (content) {
-          messages.push({
-            role: 'user',
-            content: content,
-            timestamp: new Date().toISOString(),
-            element_id: userQueryElement.id || `user-message-${turnIndex}-${Date.now()}`,
-            element_classes: userQueryElement.className || '',
-            word_count: content.split(/\s+/).filter(word => word.length > 0).length
-          });
-        }
-      }
-    }
-
-    // Attempt to extract model response
-    const modelResponseEntity = turnElement.querySelector('model-response');
-    if (modelResponseEntity) {
-      const contentWrapper = modelResponseEntity.querySelector('message-content div.markdown');
-      if (contentWrapper) {
-        const tempContentDiv = document.createElement('div');
-        tempContentDiv.innerHTML = contentWrapper.innerHTML;
-
-        const codeBlocks = tempContentDiv.querySelectorAll('pre, code, .code-block');
-        codeBlocks.forEach((block) => {
-          const codeContent = block.innerText || block.textContent || '';
-          // Using a text node replacement strategy for code blocks
-          const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
-          block.parentNode.replaceChild(preformattedText, block);
-        });
-
-        let content = tempContentDiv.innerText.trim();
-        content = content
-          .replace(/\n\s*\n\s*\n/g, '\n\n')
-          .replace(/Analysis\s*Analysis/g, 'Analysis')
-          .trim();
-
-        if (content) {
-          messages.push({
-            role: 'assistant',
-            content: content,
-            timestamp: new Date().toISOString(),
-            element_id: modelResponseEntity.id || `model-message-${turnIndex}-${Date.now()}`,
-            element_classes: modelResponseEntity.className || '',
-            word_count: content.split(/\s+/).filter(word => word.length > 0).length
-          });
-        }
-      }
-    }
+  // Add overall timeout protection
+  const TOTAL_TIMEOUT = 15000; // 15 seconds max
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Extract timeout after 15 seconds')), TOTAL_TIMEOUT);
   });
 
-  let title = document.title || 'Gemini Chat';
-  if (title.includes('Gemini')) {
-    title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
-  }
+  const extractPromise = async () => {
+    // Send progress update
+    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Looking for scrollable content...' });
 
-  const chatData = {
-    id: 'current-chat-' + Date.now(),
-    title: title,
-    timestamp: new Date().toISOString(),
-    url: window.location.href,
-    messageCount: messages.length,
-    messages: messages
+    let scrollableChatArea = null;
+
+    // Attempt 1: Target the 'infinite-scroller' within '#chat-history'
+    const chatHistoryContainer = document.getElementById('chat-history');
+    if (chatHistoryContainer) {
+      scrollableChatArea = chatHistoryContainer.querySelector('infinite-scroller');
+      if (scrollableChatArea) {
+        console.log("Successfully identified scrollable area: #chat-history > infinite-scroller", scrollableChatArea);
+      } else {
+        console.warn("Could not find 'infinite-scroller' inside #chat-history. Attempting to use #chat-history itself.");
+        scrollableChatArea = chatHistoryContainer;
+      }
+    }
+
+    // Attempt 2: Fallback to main
+    if (!scrollableChatArea || scrollableChatArea.scrollHeight <= scrollableChatArea.clientHeight) {
+      if (scrollableChatArea) {
+        console.log(`Selected element is not scrollable (scrollHeight: ${scrollableChatArea.scrollHeight}, clientHeight: ${scrollableChatArea.clientHeight}).`);
+      }
+      console.warn("Primary scroll target not found or not scrollable. Attempting fallback: 'main[role=\"main\"]'.");
+      scrollableChatArea = document.querySelector('main[role="main"]');
+      if (scrollableChatArea) {
+        console.log("Identified scrollable area with fallback: main[role=\"main\"]", scrollableChatArea);
+      }
+    }
+
+    // If a scrollable area is found, attempt to scroll it with MUCH shorter timeouts
+    if (scrollableChatArea && scrollableChatArea.scrollHeight > scrollableChatArea.clientHeight) {
+      chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Loading chat history (this may take a moment)...' });
+
+      // OPTIMIZED: Much shorter parameters - max 8 attempts, 300ms delay
+      // await scrollToTopToLoadAll(scrollableChatArea, 300, 8, 2);
+    } else if (scrollableChatArea) {
+      console.log("Identified scrollable area is not currently scrollable. Skipping auto-scroll.", scrollableChatArea);
+    } else {
+      console.warn('Could not identify a suitable scrollable chat area. Auto-scrolling skipped.');
+    }
+
+    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Extracting messages...' });
+
+    // Brief pause after scrolling
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Rest of extraction logic...
+    const messages = [];
+    const turnContainers = document.querySelectorAll('div.conversation-container');
+
+    console.log(`Found ${turnContainers.length} turn containers after scrolling attempts.`);
+
+    turnContainers.forEach((turnElement, turnIndex) => {
+      // Attempt to extract user message
+      const userQueryElement = turnElement.querySelector('user-query');
+      if (userQueryElement) {
+        const userTextElement = userQueryElement.querySelector('div.query-text > p.query-text-line');
+        if (userTextElement) {
+          const content = userTextElement.innerText.trim();
+          if (content) {
+            messages.push({
+              role: 'user',
+              content: content,
+              timestamp: new Date().toISOString(),
+              element_id: userQueryElement.id || `user-message-${turnIndex}-${Date.now()}`,
+              element_classes: userQueryElement.className || '',
+              word_count: content.split(/\s+/).filter(word => word.length > 0).length
+            });
+          }
+        }
+      }
+
+      // Attempt to extract model response
+      const modelResponseEntity = turnElement.querySelector('model-response');
+      if (modelResponseEntity) {
+        const contentWrapper = modelResponseEntity.querySelector('message-content div.markdown');
+        if (contentWrapper) {
+          const tempContentDiv = document.createElement('div');
+          tempContentDiv.innerHTML = contentWrapper.innerHTML;
+
+          const codeBlocks = tempContentDiv.querySelectorAll('pre, code, .code-block');
+          codeBlocks.forEach((block) => {
+            const codeContent = block.innerText || block.textContent || '';
+            const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
+            block.parentNode.replaceChild(preformattedText, block);
+          });
+
+          let content = tempContentDiv.innerText.trim();
+          content = content
+            .replace(/\n\s*\n\s*\n/g, '\n\n')
+            .replace(/Analysis\s*Analysis/g, 'Analysis')
+            .trim();
+
+          if (content) {
+            messages.push({
+              role: 'assistant',
+              content: content,
+              timestamp: new Date().toISOString(),
+              element_id: modelResponseEntity.id || `model-message-${turnIndex}-${Date.now()}`,
+              element_classes: modelResponseEntity.className || '',
+              word_count: content.split(/\s+/).filter(word => word.length > 0).length
+            });
+          }
+        }
+      }
+    });
+
+    let title = document.title || 'Gemini Chat';
+    if (title.includes('Gemini')) {
+      title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
+    }
+
+    const chatData = {
+      id: 'current-chat-' + Date.now(),
+      title: title,
+      timestamp: new Date().toISOString(),
+      url: window.location.href,
+      messageCount: messages.length,
+      messages: messages
+    };
+
+    console.log('Final extracted chat data (OPTIMIZED version):', chatData);
+    return chatData;
   };
 
-  console.log('Final extracted chat data (with targeted auto-scroll logic):', chatData);
-  return chatData;
+  // Race between extraction and timeout
+  return Promise.race([extractPromise(), timeoutPromise]);
 }
-
 // async function extractCurrentChatData() {
 //   console.log('Extracting current chat data...');
 
