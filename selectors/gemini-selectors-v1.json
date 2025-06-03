@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "description": "Gemini interface selectors - working as of June 2025",
+  "lastTested": "2025-06-03",
+  "geminiVersion": "Current production interface",
+  "selectors": {
+    "conversation": {
+      "containers": ["div.conversation-container"],
+      "sidebarItems": ["[data-test-id=\"conversation\"]"],
+      "recentHeader": ["h1.title.gds-label-l"]
+    },
+    "messages": {
+      "userQuery": ["user-query"],
+      "userText": ["div.query-text > p.query-text-line"],
+      "modelResponse": ["model-response"],
+      "modelContent": ["message-content div.markdown"],
+      "codeBlocks": ["pre", "code", ".code-block"]
+    },
+    "scrolling": {
+      "chatHistory": ["#chat-history"],
+      "infiniteScroller": ["infinite-scroller"],
+      "mainContent": ["main[role=\"main\"]"]
+    },
+    "title": {
+      "conversationIdAttribute": "jslog",
+      "conversationIdPattern": "\"c_{id}\"",
+      "fallbackSelectors": [
+        "user-query div.query-text p.query-text-line"
+      ]
+    },
+    "debug": {
+      "containers": [
+        "#chat-history",
+        "infinite-scroller",
+        "div.conversation-container",
+        "user-query",
+        "model-response",
+        "main[role=\"main\"]",
+        "[data-testid]"
+      ]
+    }
+  },
+  "fallbackChains": {
+    "scrollingTargets": [
+      "#chat-history > infinite-scroller",
+      "#chat-history",
+      "main[role=\"main\"]"
+    ],
+    "containerDetection": [
+      "div.conversation-container",
+      "main[role=\"main\"]",
+      "document.body"
+    ]
+  },
+  "timeouts": {
+    "scrollDelay": 300,
+    "maxScrollAttempts": 8,
+    "stabilityChecks": 2,
+    "totalTimeout": 15000
+  }
+}

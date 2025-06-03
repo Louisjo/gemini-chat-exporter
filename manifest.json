@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Gemini Chat Exporter",
-  "version": "1.1.4",
-  "description": "Export all your Gemini chats",
+  "version": "1.2.0",
+  "description": "Export all your Gemini chats with configurable selectors",
   "permissions": [
     "activeTab",
     "storage"
@@ -16,5 +16,13 @@
   "action": {
     "default_popup": "popup.html",
     "default_title": "Export Gemini Chats"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "selectors/*.json"
+      ],
+      "matches": ["https://gemini.google.com/*"]
+    }
+  ]
 }

@@ -1,6 +1,116 @@
 // Wait for page to load before setting up listeners
 let manifest = chrome.runtime.getManifest();
 let isReady = false;
+let selectorConfig = null; // Global config instance
+
+// Configuration loader and selector system
+class GeminiSelectorConfig {
+  constructor() {
+    this.config = null;
+    this.currentVersion = "v1"; // default to current working version
+  }
+
+  async loadConfig(version = this.currentVersion) {
+    try {
+      // Chrome extension can load bundled JSON files
+      const configUrl = chrome.runtime.getURL(`selectors/gemini-selectors-${version}.json`);
+      const response = await fetch(configUrl);
+      this.config = await response.json();
+      console.log(`✅ Loaded selector config ${this.config.version}: ${this.config.description}`);
+      return true;
+    } catch (error) {
+      console.error(`❌ Failed to load config ${version}:`, error);
+      
+      // Fallback to default version
+      if (version !== "v1") {
+        console.log("⚠️ Falling back to v1 config...");
+        return this.loadConfig("v1");
+      }
+      return false;
+    }
+  }
+
+  // Get selectors with built-in fallback chain
+  getSelectors(category, subcategory) {
+    if (!this.config) {
+      throw new Error("Config not loaded. Call loadConfig() first.");
+    }
+    
+    const selectors = this.config.selectors[category]?.[subcategory];
+    if (!selectors) {
+      console.warn(`⚠️ No selectors found for ${category}.${subcategory}`);
+      return [];
+    }
+    
+    // Always return as array for consistent iteration
+    return Array.isArray(selectors) ? selectors : [selectors];
+  }
+
+  // Try multiple selectors until one finds elements
+  querySelector(category, subcategory, parent = document) {
+    const selectors = this.getSelectors(category, subcategory);
+    
+    for (const selector of selectors) {
+      try {
+        const elements = parent.querySelectorAll(selector);
+        if (elements.length > 0) {
+          console.log(`✅ Found ${elements.length} elements with selector: ${selector}`);
+          return elements;
+        }
+      } catch (error) {
+        console.warn(`⚠️ Invalid selector "${selector}":`, error);
+      }
+    }
+    
+    console.warn(`❌ No elements found for ${category}.${subcategory} with any selector`);
+    return [];
+  }
+
+  // Get single element (first match)
+  querySelectorFirst(category, subcategory, parent = document) {
+    const elements = this.querySelector(category, subcategory, parent);
+    return elements.length > 0 ? elements[0] : null;
+  }
+
+  // Get conversation ID pattern for current config
+  getConversationIdPattern() {
+    const titleConfig = this.config.selectors.title;
+    return {
+      attribute: titleConfig.conversationIdAttribute,
+      pattern: titleConfig.conversationIdPattern,
+      attributeFallback: titleConfig.conversationIdAttributeFallback,
+      patternFallback: titleConfig.conversationIdPatternFallback
+    };
+  }
+
+  // Get timeout values
+  getTimeouts() {
+    return this.config.timeouts || {
+      scrollDelay: 300,
+      maxScrollAttempts: 8,
+      stabilityChecks: 2,
+      totalTimeout: 15000
+    };
+  }
+}
+
+// Initialize configuration system
+async function initializeSelectorConfig() {
+  if (!selectorConfig) {
+    selectorConfig = new GeminiSelectorConfig();
+    
+    // Try to load the latest config, fallback to v1 if needed
+    const configLoaded = await selectorConfig.loadConfig("v2") || 
+                         await selectorConfig.loadConfig("v1");
+    
+    if (!configLoaded) {
+      console.error("❌ Failed to load any selector configuration!");
+      throw new Error("Could not initialize selector configuration");
+    }
+  }
+  
+  return selectorConfig;
+}
 
 function debugDOMStructure() {
   console.log('=== DOM DEBUG INFO ===');
@@ -8,8 +118,8 @@ function debugDOMStructure() {
   console.log('Page title:', document.title);
   console.log('Document ready state:', document.readyState);
 
-  // Check for common Gemini containers
-  const containers = [
+  // Use configurable debug selectors if available
+  let containers = [
     '#chat-history',
     'infinite-scroller',
     'div.conversation-container',
@@ -18,6 +128,14 @@ function debugDOMStructure() {
     'main[role="main"]',
     '[data-testid]'
   ];
+
+  if (selectorConfig) {
+    try {
+      containers = selectorConfig.getSelectors('debug', 'containers');
+    } catch (error) {
+      console.log('Using default debug selectors (config not loaded)');
+    }
+  }
 
   containers.forEach(selector => {
     const elements = document.querySelectorAll(selector);
@@ -51,11 +169,21 @@ function debugDOMStructure() {
 
 function initialize() {
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
       isReady = true;
+      // Initialize config when DOM is ready
+      try {
+        await initializeSelectorConfig();
+      } catch (error) {
+        console.error("Failed to initialize selector config:", error);
+      }
     });
   } else {
     isReady = true;
+    // Initialize config immediately
+    initializeSelectorConfig().catch(error => {
+      console.error("Failed to initialize selector config:", error);
+    });
   }
 }
 
@@ -97,61 +225,79 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-// Add this function to extract the actual conversation title from Gemini's interface
-// Updated extractConversationTitle function that works with Gemini's actual structure
-function extractConversationTitle() {
-  console.log('Extracting conversation title using URL matching...');
+// Updated extractConversationTitle function using configurable selectors
+async function extractConversationTitle() {
+  console.log('🔍 Extracting conversation title using configurable selectors...');
 
+  const config = await initializeSelectorConfig();
+  
   // Get current conversation ID from URL
   const currentUrl = window.location.href;
   const currentId = currentUrl.split('/').pop();
-  console.log('Current conversation ID:', currentId);
+  console.log('📍 Current conversation ID:', currentId);
 
   if (!currentId) {
-    console.log('No conversation ID found in URL');
+    console.log('❌ No conversation ID found in URL');
     return null;
   }
 
-  // Look for matching conversation in sidebar using jslog attribute
-  const conversationItems = document.querySelectorAll('[data-test-id="conversation"]');
-  console.log('Found conversation items:', conversationItems.length);
+  // Use configurable selectors to find sidebar conversations
+  const conversationItems = config.querySelector('conversation', 'sidebarItems');
+  console.log(`📋 Found ${conversationItems.length} conversation items in sidebar`);
+
+  // Get conversation ID pattern from config
+  const { attribute, pattern, attributeFallback, patternFallback } = config.getConversationIdPattern();
 
   for (let i = 0; i < conversationItems.length; i++) {
     const item = conversationItems[i];
-    const jslog = item.getAttribute('jslog');
     const text = item.innerText?.trim();
 
-    // Check if jslog contains our conversation ID (with "c_" prefix)
-    if (jslog && jslog.includes(`"c_${currentId}"`)) {
-      console.log(`Found matching conversation: "${text}"`);
+    // Try primary pattern first
+    const primaryAttrValue = item.getAttribute(attribute);
+    const primarySearchPattern = pattern.replace('{id}', currentId);
+    
+    if (primaryAttrValue && primaryAttrValue.includes(primarySearchPattern)) {
+      console.log(`✅ Found matching conversation (primary): "${text}"`);
       return text;
     }
-  }
 
-  console.log('No matching conversation found in sidebar');
-
-  // Fallback: try to generate title from first user message
-  const firstUserMessage = document.querySelector('user-query div.query-text p.query-text-line');
-  if (firstUserMessage) {
-    const firstMessage = firstUserMessage.innerText?.trim();
-    if (firstMessage && firstMessage.length > 0) {
-      const generatedTitle = firstMessage.length > 50
-        ? firstMessage.substring(0, 47) + '...'
-        : firstMessage;
-      console.log('Generated title from first message:', generatedTitle);
-      return generatedTitle;
+    // Try fallback pattern if available
+    if (attributeFallback && patternFallback) {
+      const fallbackAttrValue = item.getAttribute(attributeFallback);
+      const fallbackSearchPattern = patternFallback.replace('{id}', currentId);
+      
+      if (fallbackAttrValue && fallbackAttrValue.includes(fallbackSearchPattern)) {
+        console.log(`✅ Found matching conversation (fallback): "${text}"`);
+        return text;
+      }
     }
   }
 
-  console.log('No conversation title found, using fallback');
-  return null; // Will use document.title fallback
+  console.log('❌ No matching conversation found in sidebar');
+
+  // Fallback: try to generate title from first user message using configurable selectors
+  const fallbackSelectors = config.getSelectors('title', 'fallbackSelectors');
+  for (const selector of fallbackSelectors) {
+    const firstUserMessage = document.querySelector(selector);
+    if (firstUserMessage) {
+      const firstMessage = firstUserMessage.innerText?.trim();
+      if (firstMessage && firstMessage.length > 0) {
+        const generatedTitle = firstMessage.length > 50 
+          ? firstMessage.substring(0, 47) + '...' 
+          : firstMessage;
+        console.log(`💡 Generated title from first message: "${generatedTitle}"`);
+        return generatedTitle;
+      }
+    }
+  }
+
+  console.log('❌ No conversation title found, using fallback');
+  return null;
 }
-
-
 
 async function exportCurrentChat() {
   try {
-    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Analyzing chat structure...' });
+    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Initializing configurable selectors...' });
 
     const chatData = await extractCurrentChatData();
 
@@ -171,7 +317,7 @@ async function exportCurrentChat() {
 
 async function exportAllChats() {
   try {
-    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Scanning chat history...' });
+    chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Scanning chat history with configurable selectors...' });
 
     const allChats = await extractAllChatsData();
 
@@ -195,142 +341,138 @@ async function exportAllChats() {
 }
 
 /**
- * Attempts to scroll a given element to its top to load all dynamically-loaded content.
- * It waits after each scroll and checks if new content has loaded (by observing scrollHeight).
- * @param {Element} scrollableElement The HTML element to scroll.
- * @param {number} scrollDelayMs Delay in milliseconds to wait after each scroll attempt.
- * @param {number} maxAttempts Maximum number of scroll attempts.
- * @param {number} stabilityChecksRequired How many consecutive times scrollHeight must be stable.
+ * Optimized scrolling function using configurable timeouts
  */
-/**
- * Attempts to scroll a given element to its top to load all dynamically-loaded content.
- * OPTIMIZED VERSION with much shorter timeouts and better logging
- */
-async function scrollToTopToLoadAll(scrollableElement, scrollDelayMs = 300, maxAttempts = 8, stabilityChecksRequired = 2) {
+async function scrollToTopToLoadAll(scrollableElement, config) {
   if (!scrollableElement) {
-    console.warn('Scrollable element not provided for scrollToTopToLoadAll. Auto-scrolling aborted.');
+    console.warn('⚠️ Scrollable element not provided for scrollToTopToLoadAll. Auto-scrolling aborted.');
     return;
   }
 
-  console.log(`Starting OPTIMIZED auto-scroll for element:`, scrollableElement);
-  console.log(`Config: delay=${scrollDelayMs}ms, maxAttempts=${maxAttempts}, stability=${stabilityChecksRequired}`);
+  const timeouts = config.getTimeouts();
+  const { scrollDelay, maxAttempts, stabilityChecks } = timeouts;
+
+  console.log(`🔄 Starting auto-scroll for element:`, scrollableElement);
+  console.log(`⚙️ Config: delay=${scrollDelay}ms, maxAttempts=${maxAttempts}, stability=${stabilityChecks}`);
 
   const startTime = Date.now();
   let attempts = 0;
   let previousScrollHeight = -1;
   let stableCycles = 0;
 
-  // Initial small pause for any pending UI updates before starting
   await new Promise(resolve => setTimeout(resolve, 100));
 
   while (attempts < maxAttempts) {
     const attemptStart = Date.now();
     previousScrollHeight = scrollableElement.scrollHeight;
-    scrollableElement.scrollTop = 0; // Scroll to the very top
+    scrollableElement.scrollTop = 0;
 
-    console.log(`Scroll attempt #${attempts + 1}/${maxAttempts}: scrollTop set to 0. Current scrollHeight: ${scrollableElement.scrollHeight}, Previous: ${previousScrollHeight}`);
+    console.log(`📜 Scroll attempt #${attempts + 1}/${maxAttempts}: scrollTop set to 0. Current scrollHeight: ${scrollableElement.scrollHeight}`);
 
-    // Much shorter wait time
-    await new Promise(resolve => setTimeout(resolve, scrollDelayMs));
+    await new Promise(resolve => setTimeout(resolve, scrollDelay));
 
     if (scrollableElement.scrollHeight === previousScrollHeight) {
       stableCycles++;
-      console.log(`Scroll height stable for ${stableCycles} cycle(s) at ${scrollableElement.scrollHeight}. Required: ${stabilityChecksRequired}`);
-      if (stableCycles >= stabilityChecksRequired) {
-        console.log('Scroll height stable. Assuming all content loaded.');
+      console.log(`✅ Scroll height stable for ${stableCycles} cycle(s). Required: ${stabilityChecks}`);
+      if (stableCycles >= stabilityChecks) {
+        console.log('🎯 Scroll height stable. Assuming all content loaded.');
         break;
       }
     } else {
-      stableCycles = 0; // Reset counter if scroll height changed
-      console.log(`Scroll height changed from ${previousScrollHeight} to ${scrollableElement.scrollHeight}. More content likely loaded.`);
+      stableCycles = 0;
+      console.log(`📈 Scroll height changed from ${previousScrollHeight} to ${scrollableElement.scrollHeight}`);
     }
 
     attempts++;
     const attemptDuration = Date.now() - attemptStart;
-    console.log(`Attempt ${attempts} completed in ${attemptDuration}ms`);
+    console.log(`⏱️ Attempt ${attempts} completed in ${attemptDuration}ms`);
   }
 
   const totalDuration = Date.now() - startTime;
-  console.log(`Scrolling completed in ${totalDuration}ms after ${attempts} attempts`);
+  console.log(`🏁 Scrolling completed in ${totalDuration}ms after ${attempts} attempts`);
 
   if (attempts >= maxAttempts) {
-    console.warn('Max scroll attempts reached. Not all content may be loaded.');
+    console.warn('⚠️ Max scroll attempts reached. Not all content may be loaded.');
   }
 
-  // Final small pause to ensure rendering completes
   await new Promise(resolve => setTimeout(resolve, 200));
 }
 
-// UPDATED: Modified extractCurrentChatData with timeout protection
+// Updated extractCurrentChatData function using configurable selectors
 async function extractCurrentChatData() {
-  console.log('Extracting current chat data (OPTIMIZED with timeout protection)...');
+  console.log('📊 Extracting current chat data using configurable selectors...');
+
+  const config = await initializeSelectorConfig();
+  const timeouts = config.getTimeouts();
 
   // Add overall timeout protection
-  const TOTAL_TIMEOUT = 15000; // 15 seconds max
   const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error('Extract timeout after 15 seconds')), TOTAL_TIMEOUT);
+    setTimeout(() => reject(new Error('Extract timeout after ' + timeouts.totalTimeout/1000 + ' seconds')), timeouts.totalTimeout);
   });
 
   const extractPromise = async () => {
-    // Send progress update
     chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Looking for scrollable content...' });
 
     let scrollableChatArea = null;
 
-    // Attempt 1: Target the 'infinite-scroller' within '#chat-history'
-    const chatHistoryContainer = document.getElementById('chat-history');
-    if (chatHistoryContainer) {
-      scrollableChatArea = chatHistoryContainer.querySelector('infinite-scroller');
-      if (scrollableChatArea) {
-        console.log("Successfully identified scrollable area: #chat-history > infinite-scroller", scrollableChatArea);
+    // Use configurable selectors for finding scrollable areas
+    const chatHistoryElements = config.querySelector('scrolling', 'chatHistory');
+    if (chatHistoryElements.length > 0) {
+      const chatHistoryContainer = chatHistoryElements[0];
+      const infiniteScrollers = config.querySelector('scrolling', 'infiniteScroller', chatHistoryContainer);
+      
+      if (infiniteScrollers.length > 0) {
+        scrollableChatArea = infiniteScrollers[0];
+        console.log("✅ Found scrollable area using config:", scrollableChatArea);
       } else {
-        console.warn("Could not find 'infinite-scroller' inside #chat-history. Attempting to use #chat-history itself.");
+        console.warn("⚠️ Could not find infinite scroller, using chat history container.");
         scrollableChatArea = chatHistoryContainer;
       }
     }
 
-    // Attempt 2: Fallback to main
+    // Fallback to main content area
     if (!scrollableChatArea || scrollableChatArea.scrollHeight <= scrollableChatArea.clientHeight) {
       if (scrollableChatArea) {
-        console.log(`Selected element is not scrollable (scrollHeight: ${scrollableChatArea.scrollHeight}, clientHeight: ${scrollableChatArea.clientHeight}).`);
+        console.log(`ℹ️ Selected element is not scrollable (scrollHeight: ${scrollableChatArea.scrollHeight}, clientHeight: ${scrollableChatArea.clientHeight}).`);
       }
-      console.warn("Primary scroll target not found or not scrollable. Attempting fallback: 'main[role=\"main\"]'.");
-      scrollableChatArea = document.querySelector('main[role="main"]');
-      if (scrollableChatArea) {
-        console.log("Identified scrollable area with fallback: main[role=\"main\"]", scrollableChatArea);
+      console.warn("⚠️ Primary scroll target not found, trying main content fallback...");
+      
+      const mainElements = config.querySelector('scrolling', 'mainContent');
+      if (mainElements.length > 0) {
+        scrollableChatArea = mainElements[0];
+        console.log("✅ Using main content area:", scrollableChatArea);
       }
     }
 
-    // If a scrollable area is found, attempt to scroll it with MUCH shorter timeouts
+    // Optionally scroll to load all content (currently disabled but configurable)
     if (scrollableChatArea && scrollableChatArea.scrollHeight > scrollableChatArea.clientHeight) {
-      chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Loading chat history (this may take a moment)...' });
-
-      // OPTIMIZED: Much shorter parameters - max 8 attempts, 300ms delay
-      // await scrollToTopToLoadAll(scrollableChatArea, 300, 8, 2);
+      // chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Loading chat history...' });
+      // await scrollToTopToLoadAll(scrollableChatArea, config);
     } else if (scrollableChatArea) {
-      console.log("Identified scrollable area is not currently scrollable. Skipping auto-scroll.", scrollableChatArea);
+      console.log("ℹ️ Scrollable area is not currently scrollable. Skipping auto-scroll.");
     } else {
-      console.warn('Could not identify a suitable scrollable chat area. Auto-scrolling skipped.');
+      console.warn('⚠️ Could not identify a suitable scrollable chat area. Auto-scrolling skipped.');
     }
 
     chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Extracting messages...' });
 
-    // Brief pause after scrolling
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Rest of extraction logic...
+    // Extract messages using configurable selectors
     const messages = [];
-    const turnContainers = document.querySelectorAll('div.conversation-container');
+    const turnContainers = config.querySelector('conversation', 'containers');
 
-    console.log(`Found ${turnContainers.length} turn containers after scrolling attempts.`);
+    console.log(`📝 Found ${turnContainers.length} conversation containers`);
 
     turnContainers.forEach((turnElement, turnIndex) => {
-      // Attempt to extract user message
-      const userQueryElement = turnElement.querySelector('user-query');
-      if (userQueryElement) {
-        const userTextElement = userQueryElement.querySelector('div.query-text > p.query-text-line');
-        if (userTextElement) {
-          const content = userTextElement.innerText.trim();
+      // Extract user message using configurable selectors
+      const userQueryElements = config.querySelector('messages', 'userQuery', turnElement);
+      
+      for (const userQueryElement of userQueryElements) {
+        const userTextElements = config.querySelector('messages', 'userText', userQueryElement);
+        
+        for (const userTextElement of userTextElements) {
+          const content = userTextElement.innerText?.trim();
           if (content) {
             messages.push({
               role: 'user',
@@ -340,19 +482,27 @@ async function extractCurrentChatData() {
               element_classes: userQueryElement.className || '',
               word_count: content.split(/\s+/).filter(word => word.length > 0).length
             });
+            break;
           }
         }
+        if (messages.length > 0 && messages[messages.length - 1].role === 'user') break;
       }
 
-      // Attempt to extract model response
-      const modelResponseEntity = turnElement.querySelector('model-response');
-      if (modelResponseEntity) {
-        const contentWrapper = modelResponseEntity.querySelector('message-content div.markdown');
-        if (contentWrapper) {
+      // Extract model response using configurable selectors
+      const modelResponseElements = config.querySelector('messages', 'modelResponse', turnElement);
+      
+      for (const modelResponseElement of modelResponseElements) {
+        const contentElements = config.querySelector('messages', 'modelContent', modelResponseElement);
+        
+        for (const contentWrapper of contentElements) {
           const tempContentDiv = document.createElement('div');
           tempContentDiv.innerHTML = contentWrapper.innerHTML;
 
-          const codeBlocks = tempContentDiv.querySelectorAll('pre, code, .code-block');
+          // Handle code blocks using configurable selectors
+          const codeBlockSelectors = config.getSelectors('messages', 'codeBlocks');
+          const codeBlockSelector = codeBlockSelectors.join(', ');
+          const codeBlocks = tempContentDiv.querySelectorAll(codeBlockSelector);
+          
           codeBlocks.forEach((block) => {
             const codeContent = block.innerText || block.textContent || '';
             const preformattedText = document.createTextNode(`\n\`\`\`\n${codeContent.trim()}\n\`\`\`\n`);
@@ -370,21 +520,26 @@ async function extractCurrentChatData() {
               role: 'assistant',
               content: content,
               timestamp: new Date().toISOString(),
-              element_id: modelResponseEntity.id || `model-message-${turnIndex}-${Date.now()}`,
-              element_classes: modelResponseEntity.className || '',
+              element_id: modelResponseElement.id || `model-message-${turnIndex}-${Date.now()}`,
+              element_classes: modelResponseElement.className || '',
               word_count: content.split(/\s+/).filter(word => word.length > 0).length
             });
+            break;
           }
         }
+        if (messages.length > 0 && messages[messages.length - 1].role === 'assistant') break;
       }
     });
 
-    // FIXED: Extract actual conversation title instead of document.title
-    let title = extractConversationTitle() || 'Gemini Chat';
-
-    // let title = document.title || 'Gemini Chat';
-    if (title.includes('Gemini')) {
-      title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
+    // Extract title using configurable approach
+    let title = await extractConversationTitle();
+    
+    // Fallback to cleaned document title if no conversation title found
+    if (!title) {
+      title = document.title || 'Gemini Chat';
+      if (title.includes('Gemini')) {
+        title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
+      }
     }
 
     const chatData = {
@@ -393,197 +548,43 @@ async function extractCurrentChatData() {
       timestamp: new Date().toISOString(),
       url: window.location.href,
       messageCount: messages.length,
-      messages: messages
+      messages: messages,
+      extractedWith: {
+        selectorVersion: config.config.version,
+        selectorDescription: config.config.description
+      }
     };
 
-    console.log('Final extracted chat data (OPTIMIZED version):', chatData);
+    console.log('✅ Final extracted chat data:', chatData);
     return chatData;
   };
 
   // Race between extraction and timeout
   return Promise.race([extractPromise(), timeoutPromise]);
 }
-// async function extractCurrentChatData() {
-//   console.log('Extracting current chat data...');
 
-//   // Wait a bit for dynamic content to load
-//   await new Promise(resolve => setTimeout(resolve, 1000));
-
-//   // Multiple selectors to find the chat container - UPDATED FOR CURRENT GEMINI
-//   const containerSelectors = [
-//     '[data-test-id="conversation-turn-list"]',
-//     'main[role="main"]',
-//     '[role="main"]',
-//     'main',
-//     '.conversation-container',
-//     '[data-conversation-id]',
-//     // New selectors for current Gemini interface
-//     '[data-testid="conversation-turn-list"]',
-//     '[data-testid="chat-messages"]',
-//     '.chat-history',
-//     '[jsname]', // Gemini uses jsname attributes
-//     'div[class*="conversation"]'
-//   ];
-
-//   let chatContainer = null;
-//   for (const selector of containerSelectors) {
-//     chatContainer = document.querySelector(selector);
-//     if (chatContainer) {
-//       console.log('Found chat container with selector:', selector);
-//       break;
-//     }
-//   }
-
-//   if (!chatContainer) {
-//     console.log('No specific container found, using document body');
-//     chatContainer = document.body;
-//   }
-
-//   const messages = [];
-
-//   // Enhanced message selectors for current Gemini interface
-//   const messageSelectors = [
-//     // Original selectors
-//     '[data-test-id="conversation-turn"]',
-//     '[data-message-author-role]',
-//     '.conversation-turn',
-//     '[role="presentation"]',
-//     '.message-content',
-//     'div[class*="turn"]',
-//     'div[class*="message"]',
-//     // New selectors for current Gemini
-//     '[data-testid="conversation-turn"]',
-//     '[data-testid="message"]',
-//     'div[jsname][data-message-author-role]',
-//     'div[jsname*="message"]',
-//     // Look for specific Gemini conversation patterns
-//     'article[data-message-author-role]',
-//     'div[class*="conversation"] > div',
-//     // Broader patterns that might catch messages
-//     'div[data-message-author-role="user"]',
-//     'div[data-message-author-role="model"]'
-//   ];
-
-//   let messageElements = [];
-//   for (const selector of messageSelectors) {
-//     messageElements = Array.from(chatContainer.querySelectorAll(selector));
-//     if (messageElements.length > 0) {
-//       console.log(`Found ${messageElements.length} messages with selector:`, selector);
-//       break;
-//     }
-//   }
-
-//   // Enhanced fallback: look for text patterns that suggest messages
-//   if (messageElements.length === 0) {
-//     console.log('Using enhanced fallback message detection');
-
-//     // Look for divs that contain substantial text and might be messages
-//     const allDivs = Array.from(chatContainer.querySelectorAll('div'));
-//     messageElements = allDivs.filter(div => {
-//       const text = div.innerText?.trim();
-//       const hasSubstantialText = text && text.length > 20;
-//       const notNavigation = !div.querySelector('nav, button[aria-label], input');
-//       const notTooNested = div.querySelectorAll('div').length < 20;
-//       const hasMessageIndicators = text && (
-//         text.includes('whats it called') ||
-//         text.includes('color') ||
-//         text.includes('anime') ||
-//         text.includes('Query successful') ||
-//         div.querySelector('[data-message-author-role]')
-//       );
-
-//       return hasSubstantialText && notNavigation && notTooNested && (hasMessageIndicators || text.length > 100);
-//     });
-
-//     console.log(`Fallback found ${messageElements.length} potential message elements`);
-//   }
-
-//   console.log(`Processing ${messageElements.length} message elements`);
-
-//   messageElements.forEach((element, index) => {
-//     const messageData = extractMessageData(element, index);
-//     if (messageData.content.trim() && messageData.content.length > 5) {
-//       messages.push(messageData);
-//     }
-//   });
-
-//   // Get page title
-//   let title = document.title || 'Gemini Chat';
-//   if (title.includes('Gemini')) {
-//     title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
-//   }
-
-//   const chatData = {
-//     id: 'current-chat-' + Date.now(),
-//     title: title,
-//     timestamp: new Date().toISOString(),
-//     url: window.location.href,
-//     messageCount: messages.length,
-//     messages: messages
-//   };
-
-//   console.log('Extracted chat data:', chatData);
-//   return chatData;
-// }
 async function extractAllChatsData() {
-  console.log('Extracting all chats data...');
+  console.log('📚 Extracting all chats data using configurable selectors...');
 
+  const config = await initializeSelectorConfig();
   const allChats = [];
 
-  // Try to find chat history in sidebar
-  const sidebarSelectors = [
-    '[data-test-id="chat-history"]',
-    'nav[role="navigation"]',
-    '.chat-history',
-    'aside',
-    '[role="navigation"]',
-    'nav',
-    // New selectors for current Gemini
-    '[data-testid="chat-history"]',
-    '[data-testid="conversation-list"]',
-    'div[jsname*="sidebar"]',
-    'div[jsname*="history"]'
-  ];
+  // Use configurable selectors to find sidebar
+  const sidebarElements = config.querySelector('conversation', 'sidebarItems');
+  
+  if (sidebarElements.length > 0) {
+    console.log(`📋 Found ${sidebarElements.length} sidebar conversation items`);
 
-  let sidebar = null;
-  for (const selector of sidebarSelectors) {
-    sidebar = document.querySelector(selector);
-    if (sidebar) {
-      console.log('Found sidebar with selector:', selector);
-      break;
-    }
-  }
-
-  if (sidebar) {
-    // Look for chat links/buttons in sidebar
-    const chatLinkSelectors = [
-      'a[href*="/chat/"]',
-      'button[data-chat-id]',
-      'div[role="button"]',
-      'a',
-      'button',
-      // New selectors
-      'div[jsname][role="button"]',
-      'div[data-testid*="chat"]'
-    ];
-
-    let chatLinks = [];
-    for (const selector of chatLinkSelectors) {
-      chatLinks = Array.from(sidebar.querySelectorAll(selector));
-      if (chatLinks.length > 0) {
-        console.log(`Found ${chatLinks.length} chat links with selector:`, selector);
-        break;
-      }
-    }
-
-    chatLinks.forEach((link, index) => {
-      const title = link.textContent?.trim();
+    sidebarElements.forEach((item, index) => {
+      const title = item.textContent?.trim();
       if (title && title.length > 0 && !title.match(/^(New|Start|Menu|Settings)/i)) {
+        // Try to extract link if available
+        const link = item.querySelector('a');
         allChats.push({
           id: 'sidebar-chat-' + index,
           title: title,
           timestamp: new Date().toISOString(),
-          url: link.href || window.location.href,
+          url: link?.href || window.location.href,
           type: 'sidebar_reference',
           messages: [] // Sidebar only contains titles, not full messages
         });
@@ -597,169 +598,48 @@ async function extractAllChatsData() {
     currentChat.type = 'full_conversation';
     allChats.unshift(currentChat);
   } catch (error) {
-    console.warn('Could not extract current chat:', error);
+    console.warn('⚠️ Could not extract current chat:', error);
   }
 
-  console.log(`Extracted ${allChats.length} total chats`);
+  console.log(`📊 Extracted ${allChats.length} total chats using configurable selectors`);
   return allChats;
 }
 
-// function extractMessageData(element, index) {
-//   // Enhanced role detection with more patterns
-//   const roleAttributes = element.querySelector('[data-message-author-role]');
-//   const userIndicators = [
-//     '[data-message-author-role="user"]',
-//     '.user-message',
-//     '[class*="user"]',
-//     // Look for text patterns
-//     element => element.textContent?.includes('whats it called') || element.textContent?.includes('orange etc')
-//   ];
-
-//   const assistantIndicators = [
-//     '[data-message-author-role="model"]',
-//     '[data-message-author-role="assistant"]',
-//     '.assistant-message',
-//     '.model-message',
-//     '[class*="assistant"]',
-//     '[class*="model"]',
-//     // Look for text patterns
-//     element => element.textContent?.includes('Query successful') ||
-//       element.textContent?.includes('color inversion') ||
-//       element.textContent?.includes('Analysis')
-//   ];
-
-//   let role = 'unknown';
-
-//   if (roleAttributes) {
-//     const roleValue = roleAttributes.getAttribute('data-message-author-role');
-//     role = roleValue === 'model' ? 'assistant' : roleValue;
-//   } else {
-//     // Check for role indicators including text patterns
-//     const isUser = userIndicators.some(indicator => {
-//       if (typeof indicator === 'function') {
-//         return indicator(element);
-//       }
-//       return element.querySelector(indicator);
-//     });
-
-//     const isAssistant = assistantIndicators.some(indicator => {
-//       if (typeof indicator === 'function') {
-//         return indicator(element);
-//       }
-//       return element.querySelector(indicator);
-//     });
-
-//     if (isUser) role = 'user';
-//     else if (isAssistant) role = 'assistant';
-//     else {
-//       // Enhanced fallback: check content patterns
-//       const content = element.innerText || element.textContent || '';
-//       if (content.includes('whats it called') || content.length < 50) {
-//         role = 'user';
-//       } else if (content.includes('color inversion') || content.includes('Analysis') || content.length > 100) {
-//         role = 'assistant';
-//       } else {
-//         role = index % 2 === 0 ? 'user' : 'assistant';
-//       }
-//     }
-//   }
-
-//   // Enhanced content extraction
-//   let content = '';
-
-//   // Look for specific content containers
-//   const contentSelectors = [
-//     '[data-message-content]',
-//     '.message-content',
-//     '.content',
-//     'p',
-//     'div'
-//   ];
-
-//   let contentElement = element;
-//   for (const selector of contentSelectors) {
-//     const found = element.querySelector(selector);
-//     if (found && found.innerText?.trim()) {
-//       contentElement = found;
-//       break;
-//     }
-//   }
-
-//   // Preserve code blocks and formatting
-//   const codeBlocks = contentElement.querySelectorAll('pre, code, .code-block');
-//   codeBlocks.forEach((block, i) => {
-//     const codeContent = block.innerText || block.textContent;
-//     block.setAttribute('data-code-block', i);
-//     block.innerHTML = `\n\`\`\`\n${codeContent}\n\`\`\`\n`;
-//   });
-
-//   // Get the text content
-//   content = contentElement.innerText || contentElement.textContent || '';
-
-//   // Clean up content
-//   content = content
-//     .replace(/\n\s*\n\s*\n/g, '\n\n') // Remove excessive newlines
-//     .replace(/Analysis\s*Analysis/g, 'Analysis') // Remove duplicate "Analysis"
-//     .trim();
-
-//   return {
-//     role: role,
-//     content: content,
-//     timestamp: new Date().toISOString(),
-//     element_id: element.id || `message-${index}`,
-//     element_classes: element.className || '',
-//     word_count: content.split(/\s+/).filter(word => word.length > 0).length
-//   };
-// }
-
 /**
  * Sanitizes a string to be safe for use as a filename.
- * Removes/replaces characters forbidden on major OSes and cleans up the result.
- * @param {string} name The original string to sanitize.
- * @param {string} defaultName A name to use if sanitization results in an empty string.
- * @param {number} maxLength Max length for the sanitized name (excluding suffix).
- * @returns {string} A sanitized string suitable for use in a filename.
  */
 function sanitizeFilename(name, defaultName = 'Untitled_Chat', maxLength = 100) {
   if (typeof name !== 'string' || !name.trim()) {
     return defaultName;
   }
 
-  // Remove or replace characters forbidden in Windows, macOS, and Linux filenames.
-  // Common forbidden characters: / \ ? % * : | " < > and null/control characters.
   let sanitized = name.replace(/[<>:"\/\\|?*\x00-\x1F]/g, '_');
-
-  // Replace multiple consecutive underscores (or other replacements) with a single one
   sanitized = sanitized.replace(/_+/g, '_');
-
-  // Remove leading/trailing underscores, periods, or spaces that might have been created
   sanitized = sanitized.replace(/^[_.\s]+|[_.\s]+$/g, '').trim();
 
-  // Truncate to a reasonable length to avoid overly long filenames
   if (sanitized.length > maxLength) {
     sanitized = sanitized.substring(0, maxLength).trim();
-    // Ensure it doesn't end with an underscore after truncation
     sanitized = sanitized.replace(/_+$/, '');
   }
 
-  // If, after all that, the string is empty (e.g., consisted only of forbidden chars), use default
   if (!sanitized) {
     return defaultName;
   }
 
   return sanitized;
 }
+
 async function downloadAsJSON(data, baseFilenamePrefix) {
   return new Promise((resolve, reject) => {
     try {
-      // Get manifest data
-
-
       const exportData = {
         export_info: {
           timestamp: new Date().toISOString(),
-          // Dynamically use the name and version from manifest.json
           source: `${manifest.name} v${manifest.version}`,
+          selectorConfig: selectorConfig ? {
+            version: selectorConfig.config.version,
+            description: selectorConfig.config.description
+          } : "config not loaded",
           total_chats: data.length,
           total_messages: data.reduce((sum, chat) => sum + (chat.messages?.length || 0), 0)
         },
@@ -790,7 +670,6 @@ async function downloadAsJSON(data, baseFilenamePrefix) {
       }
 
       a.download = `${chatTitleForFilename}-${dateTimeSuffix}.json`;
-
       a.style.display = 'none';
       document.body.appendChild(a);
       a.click();
@@ -807,6 +686,7 @@ async function downloadAsJSON(data, baseFilenamePrefix) {
     }
   });
 }
+
 // Alternative export formats
 function downloadAsText(data, filename) {
   let textContent = '';
@@ -836,6 +716,5 @@ function downloadAsText(data, filename) {
   URL.revokeObjectURL(url);
 }
 
-// Log that content script is loaded
-console.log(`${manifest.name} content script v${manifest.version} per manifest`);
-
+// Log that content script is loaded with config info
+console.log(`🚀 ${manifest.name} content script v${manifest.version} loaded with configurable selectors`);
