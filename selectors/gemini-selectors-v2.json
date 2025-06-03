@@ -1,0 +1,80 @@
+{
+  "version": "2.0.0",
+  "description": "Updated selectors for future Gemini interface changes",
+  "lastTested": "2025-12-01",
+  "geminiVersion": "Next generation interface (estimated)",
+  "selectors": {
+    "conversation": {
+      "containers": [
+        "div.chat-conversation-container",
+        "div.conversation-container",
+        ".message-thread"
+      ],
+      "sidebarItems": [
+        "[data-testid=\"chat-item\"]",
+        "[data-test-id=\"conversation\"]",
+        ".sidebar-conversation"
+      ],
+      "recentHeader": [
+        "h1.recent-chats-title",
+        "h1.title.gds-label-l"
+      ]
+    },
+    "messages": {
+      "userQuery": [
+        "user-message",
+        "user-query",
+        ".user-input"
+      ],
+      "userText": [
+        ".message-text > p",
+        "div.query-text > p.query-text-line",
+        ".user-content"
+      ],
+      "modelResponse": [
+        "assistant-response",
+        "model-response",
+        ".ai-response"
+      ],
+      "modelContent": [
+        ".response-content .markdown",
+        "message-content div.markdown",
+        ".ai-message-body"
+      ],
+      "codeBlocks": ["pre", "code", ".code-block", ".syntax-highlight"]
+    },
+    "scrolling": {
+      "chatHistory": [
+        "#conversation-history",
+        "#chat-history",
+        ".chat-container"
+      ],
+      "infiniteScroller": [
+        "virtual-scroller",
+        "infinite-scroller",
+        ".scroll-container"
+      ],
+      "mainContent": [
+        "main[role=\"main\"]",
+        ".main-chat-area",
+        "#chat-main"
+      ]
+    },
+    "title": {
+      "conversationIdAttribute": "data-conversation-id",
+      "conversationIdAttributeFallback": "jslog",
+      "conversationIdPattern": "\"{id}\"",
+      "conversationIdPatternFallback": "\"c_{id}\"",
+      "fallbackSelectors": [
+        ".first-user-message .message-text",
+        "user-query div.query-text p.query-text-line"
+      ]
+    }
+  },
+  "timeouts": {
+    "scrollDelay": 250,
+    "maxScrollAttempts": 10,
+    "stabilityChecks": 3,
+    "totalTimeout": 20000
+  }
+}

@@ -3,7 +3,7 @@
 <head>
   <style>
     body {
-      width: 300px;
+      width: 320px;
       padding: 20px;
       font-family: Arial, sans-serif;
     }
@@ -16,31 +16,57 @@
       border: none;
       border-radius: 4px;
       cursor: pointer;
+      font-size: 14px;
     }
     button:hover {
       background-color: #3367d6;
+    }
+    #debugBtn {
+      background-color: #ff9800;
+      font-size: 12px;
+    }
+    #debugBtn:hover {
+      background-color: #f57c00;
     }
     #status {
       margin-top: 10px;
       padding: 10px;
       border-radius: 4px;
       text-align: center;
+      font-size: 12px;
+      min-height: 20px;
     }
     .success {
       background-color: #d4edda;
       color: #155724;
+      border: 1px solid #c3e6cb;
     }
     .error {
       background-color: #f8d7da;
       color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+    h3 {
+      margin-top: 0;
+      color: #333;
+    }
+    .divider {
+      border-top: 1px solid #ddd;
+      margin: 10px 0;
     }
   </style>
 </head>
 <body>
   <h3>Gemini Chat Exporter</h3>
-  <button id="exportBtn">Export All Chats</button>
   <button id="exportCurrentBtn">Export Current Chat</button>
+  <button id="exportBtn">Export All Chats</button>
+
+  <div class="divider"></div>
+
+  <button id="debugBtn">Debug DOM Structure</button>
+
   <div id="status"></div>
+
   <script src="popup.js"></script>
 </body>
 </html>
