@@ -97,6 +97,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Add this function to extract the actual conversation title from Gemini's interface
+// Updated extractConversationTitle function that works with Gemini's actual structure
+function extractConversationTitle() {
+  console.log('Extracting conversation title using URL matching...');
+
+  // Get current conversation ID from URL
+  const currentUrl = window.location.href;
+  const currentId = currentUrl.split('/').pop();
+  console.log('Current conversation ID:', currentId);
+
+  if (!currentId) {
+    console.log('No conversation ID found in URL');
+    return null;
+  }
+
+  // Look for matching conversation in sidebar using jslog attribute
+  const conversationItems = document.querySelectorAll('[data-test-id="conversation"]');
+  console.log('Found conversation items:', conversationItems.length);
+
+  for (let i = 0; i < conversationItems.length; i++) {
+    const item = conversationItems[i];
+    const jslog = item.getAttribute('jslog');
+    const text = item.innerText?.trim();
+
+    // Check if jslog contains our conversation ID (with "c_" prefix)
+    if (jslog && jslog.includes(`"c_${currentId}"`)) {
+      console.log(`Found matching conversation: "${text}"`);
+      return text;
+    }
+  }
+
+  console.log('No matching conversation found in sidebar');
+
+  // Fallback: try to generate title from first user message
+  const firstUserMessage = document.querySelector('user-query div.query-text p.query-text-line');
+  if (firstUserMessage) {
+    const firstMessage = firstUserMessage.innerText?.trim();
+    if (firstMessage && firstMessage.length > 0) {
+      const generatedTitle = firstMessage.length > 50
+        ? firstMessage.substring(0, 47) + '...'
+        : firstMessage;
+      console.log('Generated title from first message:', generatedTitle);
+      return generatedTitle;
+    }
+  }
+
+  console.log('No conversation title found, using fallback');
+  return null; // Will use document.title fallback
+}
+
+
+
 async function exportCurrentChat() {
   try {
     chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Analyzing chat structure...' });
@@ -327,7 +379,10 @@ async function extractCurrentChatData() {
       }
     });
 
-    let title = document.title || 'Gemini Chat';
+    // FIXED: Extract actual conversation title instead of document.title
+    let title = extractConversationTitle() || 'Gemini Chat';
+
+    // let title = document.title || 'Gemini Chat';
     if (title.includes('Gemini')) {
       title = title.replace(/\s*[-–—]\s*Gemini.*$/, '').trim() || 'Gemini Chat';
     }
