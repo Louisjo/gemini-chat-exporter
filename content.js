@@ -88,10 +88,90 @@ async function exportAllChats() {
     return { success: false, error: error.message };
   }
 }
-async function extractCurrentChatData() {
-  console.log('Extracting current chat data based on debug findings...');
+async function loadAllMessages() {
+  console.log('🔄 Loading all messages by scrolling...');
   
+  const scrollContainer = document.querySelector('.chat-history-scroll-container') ||
+                         document.querySelector('#chat-history') ||
+                         document.querySelector('.chat-history') ||
+                         document.querySelector('infinite-scroller') ||
+                         document.querySelector('main');
+  
+  if (!scrollContainer) {
+    console.log('⚠️ No scroll container found, proceeding with visible content');
+    return;
+  }
+  
+  let lastMessageCount = 0;
+  let currentMessageCount = 0;
+  let noChangeCount = 0;
+  const maxScrollAttempts = 50; // Prevent infinite loops
+  let scrollAttempts = 0;
+  
+  chrome.runtime.sendMessage({ action: 'exportProgress', message: 'Loading full conversation history...' });
+  
+  while (scrollAttempts < maxScrollAttempts) {
+    // Count current messages
+    const allMessages = document.querySelectorAll('user-query, model-response, USER-QUERY, MODEL-RESPONSE');
+    currentMessageCount = allMessages.length;
+    
+    // Update progress
+    if (scrollAttempts % 5 === 0) {
+      chrome.runtime.sendMessage({ 
+        action: 'exportProgress', 
+        message: `Loading messages... Found ${currentMessageCount} so far` 
+      });
+    }
+    
+    console.log(`📊 Scroll attempt ${scrollAttempts + 1}: Found ${currentMessageCount} messages`);
+    
+    // If no new messages loaded after several attempts, we're done
+    if (currentMessageCount === lastMessageCount) {
+      noChangeCount++;
+      if (noChangeCount >= 3) {
+        console.log('✅ No new messages loading, conversation fully loaded');
+        break;
+      }
+    } else {
+      noChangeCount = 0;
+      lastMessageCount = currentMessageCount;
+    }
+    
+    // Scroll up to load earlier messages
+    scrollContainer.scrollTo({
+      top: 0,
+      behavior: 'auto' // Use 'auto' instead of 'smooth' for faster loading
+    });
+    
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Try scrolling up further if we're not at the top
+    if (scrollContainer.scrollTop > 0) {
+      scrollContainer.scrollTop = 0;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
+    scrollAttempts++;
+  }
+  
+  console.log(`✅ Finished loading. Total attempts: ${scrollAttempts}, Final message count: ${currentMessageCount}`);
+  
+  // Scroll back to bottom to show latest messages
+  scrollContainer.scrollTo({
+    top: scrollContainer.scrollHeight,
+    behavior: 'auto'
+  });
+  
+  // Final wait for DOM to stabilize
   await new Promise(resolve => setTimeout(resolve, 1000));
+}
+
+async function extractCurrentChatData() {
+  console.log('Extracting current chat data with full scroll loading...');
+  
+  // First, scroll to load all messages
+  await loadAllMessages();
   
   const messages = [];
   
@@ -318,7 +398,7 @@ async function downloadAsJSON(data, filename) {
       const exportData = {
         export_info: {
           timestamp: new Date().toISOString(),
-          source: 'Gemini Chat Exporter v1.0.4',
+          source: 'Gemini Chat Exporter v1.1.0',
           total_chats: data.length,
           total_messages: data.reduce((sum, chat) => sum + (chat.messages?.length || 0), 0)
         },
@@ -349,4 +429,4 @@ async function downloadAsJSON(data, filename) {
   });
 }
 
-console.log('Gemini Chat Exporter v1.0.4 loaded - Clean formatting and duplicate removal');
+console.log('Gemini Chat Exporter v1.1.0 loaded - Auto-scroll for full conversation history');

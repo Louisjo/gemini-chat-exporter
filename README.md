@@ -4,11 +4,13 @@ A Chrome extension that allows you to export your Google Gemini chat conversatio
 
 ## Features
 
-- **Export Current Chat**: Export the currently visible conversation
-- **Export All Chats**: Export current conversation plus sidebar chat history
+- **Export Full Chat History**: Automatically scrolls to load complete conversation before export
+- **Export All Chats**: Export current conversation plus sidebar chat history  
+- **Auto-Scroll Loading**: Handles lazy-loaded content by progressive scrolling
 - **JSON Format**: Clean, structured data that's easy to process
 - **Preserves Formatting**: Maintains code blocks and text structure
 - **Privacy-First**: All processing happens locally in your browser
+- **Progress Feedback**: Real-time updates during long conversation loading
 - **Error Handling**: Comprehensive feedback on success/failure
 
 ## Installation
@@ -38,8 +40,9 @@ A Chrome extension that allows you to export your Google Gemini chat conversatio
 2. **Export your chats:**
    - Click the Gemini Chat Exporter icon in your toolbar
    - Choose your export option:
-     - **Export Current Chat**: Downloads the visible conversation
+     - **Export Full Chat History**: Automatically loads complete conversation via scrolling
      - **Export All Chats**: Downloads current chat + sidebar history
+   - **Note**: Full history export may take 30-60 seconds for long conversations
 
 3. **Access your data:**
    - Files download as JSON format
@@ -155,14 +158,30 @@ This extension is not affiliated with Google or the Gemini AI service. It's an i
 
 ## Changelog
 
+### v1.1.0
+- **Major Feature: Full Chat History Export**
+- Auto-scroll functionality to load complete conversations
+- Handles lazy-loaded content and infinite scroll
+- Progress feedback during long conversation loading
+- Updated UI with better user guidance
+- Improved error handling for scroll operations
+
+### v1.0.4
+- Clean formatting and duplicate removal
+- Prevent duplicate user text extraction
+- Improved assistant response formatting
+- Remove markdown bold markers
+- Better text cleanup and formatting
+
+### v1.0.3
+- Fixed extraction based on debug analysis
+- Proper separation of user queries and model responses
+- Correct extraction using USER-QUERY and MODEL-RESPONSE elements
+
 ### v1.0.2
-- **Major improvements to chat extraction**
 - Enhanced DOM selectors for current Gemini interface
 - Better message detection with fallback patterns
 - Improved content extraction and role detection
-- Added text pattern recognition for user/assistant messages
-- Fixed extraction of full conversations including longer responses
-- Better handling of dynamic content and loading delays
 
 ### v1.0.1
 - Initial release
