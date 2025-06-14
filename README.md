@@ -1,16 +1,20 @@
 # Gemini Chat Exporter
 
+**Forked from [Louisjo/gemini-chat-exporter](https://github.com/Louisjo/gemini-chat-exporter.git)**
+
 A Chrome extension that allows you to export your Google Gemini chat conversations to JSON format for backup, analysis, or migration purposes.
 
 ## Features
 
-- **Export Full Chat History**: Automatically scrolls to load complete conversation before export
+- **Export Full Chat History**: Automatically scrolls to load complete conversation before export, ensuring all messages are captured.
 - **Export All Chats**: Export current conversation plus sidebar chat history  
-- **Auto-Scroll Loading**: Handles lazy-loaded content by progressive scrolling
-- **JSON Format**: Clean, structured data that's easy to process
+- **Robust Auto-Scroll Loading**: Enhanced logic for lazy-loaded content, with more aggressive scrolling and waiting mechanisms to capture full chat history reliably.
+- **Accurate Message Extraction**: Improved message detection and extraction within the DOM to ensure all loaded messages are correctly captured.
+- **JSON Format**: Clean, structured data that's easy to process, now including chat metadata and excluding redundant message timestamps.
 - **Preserves Formatting**: Maintains code blocks and text structure
 - **Privacy-First**: All processing happens locally in your browser
-- **Progress Feedback**: Real-time updates during long conversation loading
+- **Enhanced Progress Feedback**: Real-time updates during long conversation loading, including a spinner and message count in the popup.
+- **Customizable Filename**: Exported files now include date and time (HH-MM) in the filename for easier organization.
 - **Error Handling**: Comprehensive feedback on success/failure
 
 ## Installation
@@ -46,7 +50,7 @@ A Chrome extension that allows you to export your Google Gemini chat conversatio
 
 3. **Access your data:**
    - Files download as JSON format
-   - Filename includes the current date
+   - Filename includes the current date and time.
    - Open with any text editor or JSON viewer
 
 ## Export Format
@@ -57,7 +61,7 @@ The exported JSON includes:
 {
   "export_info": {
     "timestamp": "2024-01-20T10:30:00.000Z",
-    "source": "Gemini Chat Exporter v1.0.2",
+    "source": "Gemini Chat Exporter v1.1.2",
     "total_chats": 1,
     "total_messages": 10
   },  "chats": [
@@ -71,13 +75,11 @@ The exported JSON includes:
         {
           "role": "user",
           "content": "How do I create a Chrome extension?",
-          "timestamp": "2024-01-20T10:30:00.000Z",
           "word_count": 7
         },
         {
           "role": "assistant", 
           "content": "To create a Chrome extension...",
-          "timestamp": "2024-01-20T10:30:00.000Z",
           "word_count": 150
         }
       ]
@@ -157,6 +159,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 This extension is not affiliated with Google or the Gemini AI service. It's an independent tool created to help users export their own chat data.
 
 ## Changelog
+
+### v1.1.2
+- **Refactor & Bug Fixes**: Comprehensive update to enhance reliability and user experience. This includes:
+  - Corrected `popup.js` event listener initialization.
+  - Improved auto-scroll logic in `content.js` to ensure full conversation loading (alternating scroll up/down, increased delays).
+  - Enhanced message extraction in `content.js` to correctly capture all visible messages from the DOM.
+  - Added a spinner and message count to the export progress display in `popup.js`.
+  - Included `HH-MM` timestamp in the exported filename.
+  - Restored complete JSON export structure with `export_info` and chat metadata.
+  - Removed redundant `timestamp` field from individual messages in the exported JSON.
+  - Localized all debug and console messages to English for consistency.
+
+### v1.1.1
+- **Bug Fix**: Improved full chat history export for long conversations. Enhanced auto-scroll logic to ensure all messages are loaded and extracted, addressing issues where only visible content was captured. Added more robust message detection and extraction within the DOM.
 
 ### v1.1.0
 - **Major Feature: Full Chat History Export**

@@ -1,9 +1,9 @@
 document.addEventListener('DOMContentLoaded', function() {
-  const exportBtn = document.getElementById('exportBtn');
   const exportCurrentBtn = document.getElementById('exportCurrentBtn');
+  const exportAllChatsBtn = document.getElementById('exportAllBtn');
   const status = document.getElementById('status');
 
-  exportBtn.addEventListener('click', async () => {
+  exportAllChatsBtn.addEventListener('click', async () => {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      showStatus('Exporting chats...', '');
+      showStatus('Exporting chats...', 'loading');
       
       await chrome.tabs.sendMessage(tab.id, { action: 'exportAllChats' });
       
@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
 
-      showStatus('Exporting current chat...', '');
+      showStatus('Exporting current chat...', 'loading');
       
       await chrome.tabs.sendMessage(tab.id, { action: 'exportCurrentChat' });
       
@@ -39,9 +39,22 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
 
-  function showStatus(message, type) {
-    status.textContent = message;
+  function showStatus(message, type, count = null) {
     status.className = type;
+    let displayMessage = message;
+
+    if (type === 'loading') {
+      displayMessage = `<div class="spinner"></div> ${message}`;
+      if (count !== null) {
+        displayMessage += ` (Found ${count} messages)`;
+      }
+    } else if (type === 'success') {
+        displayMessage = `✅ ${message}`;
+    } else if (type === 'error') {
+        displayMessage = `❌ ${message}`;
+    }
+
+    status.innerHTML = displayMessage;
   }
 
   // Listen for messages from content script
@@ -50,6 +63,8 @@ document.addEventListener('DOMContentLoaded', function() {
       showStatus('Export completed successfully!', 'success');
     } else if (message.action === 'exportError') {
       showStatus('Export failed: ' + message.error, 'error');
+    } else if (message.action === 'exportProgress') {
+      showStatus(message.message, 'loading', message.count);
     }
   });
 });
